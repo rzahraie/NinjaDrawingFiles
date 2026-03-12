@@ -136,6 +136,55 @@
  private KeyBinding keyBindingCtrlR_Control;
  private KeyBinding keyBindingCtrlR_Window;
  
+ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
+    ChartControl chartControl,
+    ChartBars chartBars)
+{
+    if (!startFrozen)
+        return null;
+
+    if (!_lastP2Idx.HasValue || !_lastP3Idx.HasValue)
+        return null;
+
+    int p1Idx = startBar;
+    int p2Idx = _lastP2Idx.Value;
+    int p3Idx = _lastP3Idx.Value;
+
+    double p1Price = (double)startPriceDec;
+    double p2Price = GetPriceAtBar(chartBars, p2Idx, isUpContainer ? true : false);
+    double p3Price = GetPriceAtBar(chartBars, p3Idx, isUpContainer ? false : true);
+
+    if (p3Idx == p1Idx)
+        return null;
+
+    double rtlSlope = (p3Price - p1Price) / (double)(p3Idx - p1Idx);
+
+    // LTL is parallel to RTL and passes through P2
+    double ltlSlope = rtlSlope;
+
+    return new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot(
+        containerId: p1Idx, // temporary deterministic ID
+        isUpContainer: isUpContainer,
+        p1: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p1Idx, p1Price),
+        p2: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p2Idx, p2Price),
+        p3: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p3Idx, p3Price),
+        rtlSlope: rtlSlope,
+        ltlSlope: ltlSlope);
+}
+
+private double GetPriceAtBar(ChartBars chartBars, int barIdx, bool useHigh)
+{
+    if (chartBars == null || chartBars.Bars == null)
+        return 0.0;
+
+    if (barIdx < 0 || barIdx >= chartBars.Bars.Count)
+        return 0.0;
+
+    return useHigh
+        ? chartBars.Bars.GetHigh(barIdx)
+        : chartBars.Bars.GetLow(barIdx);
+}
+
  private void RequestRepaint(ChartControl cc)
 {
     if (cc == null || _invalidatePending) return;
