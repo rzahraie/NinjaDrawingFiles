@@ -172,6 +172,23 @@
         ltlSlope: ltlSlope);
 }
 
+private void PrintManualContainerSnapshot(
+    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot snapshot)
+{
+    Print(string.Format(
+        "ManualContainer C#{0} dir={1} P1=({2},{3}) P2=({4},{5}) P3=({6},{7}) rtlSlope={8} ltlSlope={9}",
+        snapshot.ContainerId,
+        snapshot.IsUpContainer ? "Up" : "Down",
+        snapshot.P1.BarIndex,
+        snapshot.P1.Price,
+        snapshot.P2.BarIndex,
+        snapshot.P2.Price,
+        snapshot.P3.BarIndex,
+        snapshot.P3.Price,
+        snapshot.RtlSlope,
+        snapshot.LtlSlope));
+}
+
 private double GetPriceAtBar(ChartBars chartBars, int barIdx, bool useHigh)
 {
     if (chartBars == null || chartBars.Bars == null)
@@ -1243,6 +1260,12 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  {
  try {
  CalculateLTLCoordinates(chartControl, chartScale);
+	 
+var chartBars = GetBarsForAnchors(chartControl);
+	 
+var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
+if (snapshot.HasValue)
+    PrintManualContainerSnapshot(snapshot.Value);
  }
  catch(System.Exception e) {
  Print("OnMouseUp : " + e.ToString());
@@ -1896,7 +1919,7 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  AutoExtend = false;
  ExtendBreakRule = BreakMode.HighLowPenetration;
  AutoExtendIntervalMs = 250;
- DebugLogs = true; // off by default
+ DebugLogs = false; // off by default
  
  StartAnchor = new ChartAnchor
  {
