@@ -361,7 +361,7 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  private void PrintDebug(string message)
  {
  if (DebugLogs)
- Print($"[CustomLine] {message}");
+ PrintDebug($"[CustomLine] {message}");
  }
  
  // (Optional) use this overload when building expensive strings:
@@ -369,7 +369,7 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  private void PrintDebug(Func<string> messageFactory)
  {
  if (DebugLogs)
- Print($"[CustomLine] {messageFactory()}");
+ PrintDebug($"[CustomLine] {messageFactory()}");
  }
  // ==========================================================
  
@@ -1195,7 +1195,7 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  }
  catch (Exception ex)
  {
- Print("OnMouseMove (VeEnd): " + ex);
+ PrintDebug("OnMouseMove (VeEnd): " + ex);
  }
  }
  }
@@ -1221,7 +1221,7 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  }
  catch (Exception ex)
  {
- Print("OnMouseMove (End): " + ex);
+ PrintDebug("OnMouseMove (End): " + ex);
  }
  }
  
@@ -1249,51 +1249,54 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  }
  }
  
- public override void OnMouseUp(ChartControl chartControl, ChartPanel chartPanel, ChartScale chartScale, ChartAnchor dataPoint)
+ public override void OnMouseUp(ChartControl chartControl, ChartPanel chartPanel, ChartScale chartScale, ChartAnchor dataPoint) 
  {
- if (DrawingState == DrawingState.Moving || DrawingState == DrawingState.Editing)
- DrawingState = DrawingState.Normal;
- if (editingAnchor != null)
- {
- editingAnchor.IsEditing = false;
- if (editingAnchor == VeEndAnchor || editingAnchor == EndAnchor)
- {
- try {
- CalculateLTLCoordinates(chartControl, chartScale);
-	 
-var chartBars = GetBarsForAnchors(chartControl);
-	 
-var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
-if (snapshot.HasValue)
-    PrintManualContainerSnapshot(snapshot.Value);
- }
- catch(System.Exception e) {
- Print("OnMouseUp : " + e.ToString());
- }
- finally
- {
- //_lockP2DuringRtlDrag = false; // release the lock after the adjustment is finalized
- //_p2FrozenIdx = null; // end of drag = unfreeze
- _keepP2ThisPass = false; // <- reset the scoped flag
- //_lockP2DuringRtlDrag = false;
- }
- }
- }
- editingAnchor = null;
- 
- rtlEndPointPrice = EndAnchor.Price;
- 
- var bars = GetBarsForAnchors(chartControl);
- if (bars == null)
- return; 
- 
- rtlEndPointX = IndexAtOrBefore(bars, chartControl, EndAnchor.Time);
- _lastEIdx = rtlEndPointX;
- 
- EndAnchor.SlotIndex = rtlEndPointX; // NEW
- VeEndAnchor.SlotIndex = rtlEndPointX; // NEW (keeps the handle visually on the same bar)
- 
- if (AutoExtend) StartAutoExtend();
+   if (DrawingState == DrawingState.Moving || DrawingState == DrawingState.Editing)
+     DrawingState = DrawingState.Normal;
+   if (editingAnchor != null) 
+   {
+     editingAnchor.IsEditing = false;
+     if (editingAnchor == VeEndAnchor || editingAnchor == EndAnchor) {
+       try 
+	   {
+         CalculateLTLCoordinates(chartControl, chartScale);
+       } 
+	   catch (System.Exception e) 
+	   {
+         Print("OnMouseUp : " + e.ToString());
+       } 
+	   finally 
+	   {
+         //_lockP2DuringRtlDrag = false; // release the lock after the adjustment is finalized
+         //_p2FrozenIdx = null; // end of drag = unfreeze
+         _keepP2ThisPass = false; // <- reset the scoped flag
+         //_lockP2DuringRtlDrag = false;
+       }
+     }
+   }
+   editingAnchor = null;
+
+   rtlEndPointPrice = EndAnchor.Price;
+
+   var bars = GetBarsForAnchors(chartControl);
+   if (bars == null)
+     return;
+
+   rtlEndPointX = IndexAtOrBefore(bars, chartControl, EndAnchor.Time);
+   _lastEIdx = rtlEndPointX;
+
+   EndAnchor.SlotIndex = rtlEndPointX; // NEW
+   VeEndAnchor.SlotIndex = rtlEndPointX; // NEW (keeps the handle visually on the same bar)
+
+   if (AutoExtend) StartAutoExtend();
+   
+   var chartBars = GetBarsForAnchors(chartControl);
+   Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
+   var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
+   if (snapshot.HasValue)
+   		PrintManualContainerSnapshot(snapshot.Value);
+   else
+	 	Print("[CustomLine] snapshot is null");
  }
  
  public override void OnEdited(ChartControl chartControl, ChartPanel chartPanel, ChartScale chartScale, DrawingTool oldinstance)
@@ -2274,7 +2277,7 @@ if (snapshot.HasValue)
  }
  catch (Exception ex)
  {
- Print($"UnsetContextMenuHandlers: Exception - {ex.Message}");
+ PrintDebug($"UnsetContextMenuHandlers: Exception - {ex.Message}");
  }
  
  activeChartControl = null;
