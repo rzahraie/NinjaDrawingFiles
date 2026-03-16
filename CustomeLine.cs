@@ -136,6 +136,49 @@
  private KeyBinding keyBindingCtrlR_Control;
  private KeyBinding keyBindingCtrlR_Window;
  
+private int? _lastPublishedP2Idx = null;
+private int? _lastPublishedP3Idx = null;
+private double? _lastPublishedP2Price = null;
+private double? _lastPublishedP3Price = null;
+ 
+ private bool ShouldPublishManualSnapshot(
+    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot snapshot)
+{
+    bool same =
+        _lastPublishedP2Idx.HasValue &&
+        _lastPublishedP3Idx.HasValue &&
+        _lastPublishedP2Price.HasValue &&
+        _lastPublishedP3Price.HasValue &&
+        _lastPublishedP2Idx.Value == snapshot.P2.BarIndex &&
+        _lastPublishedP3Idx.Value == snapshot.P3.BarIndex &&
+        _lastPublishedP2Price.Value == snapshot.P2.Price &&
+        _lastPublishedP3Price.Value == snapshot.P3.Price;
+
+    if (same)
+        return false;
+
+    _lastPublishedP2Idx = snapshot.P2.BarIndex;
+    _lastPublishedP3Idx = snapshot.P3.BarIndex;
+    _lastPublishedP2Price = snapshot.P2.Price;
+    _lastPublishedP3Price = snapshot.P3.Price;
+
+    return true;
+}
+
+private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars chartBars)
+{
+    var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
+    if (!snapshot.HasValue)
+        return;
+
+    if (!ShouldPublishManualSnapshot(snapshot.Value))
+        return;
+
+    Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
+    PrintManualContainerSnapshot(snapshot.Value);
+    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(snapshot.Value);
+}
+
  private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
     ChartControl chartControl,
     ChartBars chartBars)
@@ -162,14 +205,21 @@
     // LTL is parallel to RTL and passes through P2
     double ltlSlope = rtlSlope;
 
-    return new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot(
-        containerId: p1Idx, // temporary deterministic ID
-        isUpContainer: isUpContainer,
-        p1: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p1Idx, p1Price),
-        p2: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p2Idx, p2Price),
-        p3: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p3Idx, p3Price),
-        rtlSlope: rtlSlope,
-        ltlSlope: ltlSlope);
+    var breakMode =
+    ExtendBreakRule == BreakMode.CloseCross
+        ? NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.CloseCross
+        : NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.HighLowPenetration;
+
+	return new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot(
+	    containerId: p1Idx,
+	    isUpContainer: isUpContainer,
+	    p1: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p1Idx, p1Price),
+	    p2: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p2Idx, p2Price),
+	    p3: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p3Idx, p3Price),
+	    rtlSlope: rtlSlope,
+	    ltlSlope: ltlSlope,
+	    breakMode: breakMode,
+	    breakToleranceTicks: 0.0);
 }
 
 private void PrintManualContainerSnapshot(
@@ -1291,12 +1341,16 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
    if (AutoExtend) StartAutoExtend();
    
    var chartBars = GetBarsForAnchors(chartControl);
-   Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
    var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
    if (snapshot.HasValue)
-   		PrintManualContainerSnapshot(snapshot.Value);
-   else
-	 	Print("[CustomLine] snapshot is null");
+   {
+	    if (ShouldPublishManualSnapshot(snapshot.Value))
+	    {
+	        Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
+	        PrintManualContainerSnapshot(snapshot.Value);
+	        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(snapshot.Value);
+	    }
+   }
  }
  
  public override void OnEdited(ChartControl chartControl, ChartPanel chartPanel, ChartScale chartScale, DrawingTool oldinstance)
