@@ -189,9 +189,57 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
     if (!_lastP2Idx.HasValue || !_lastP3Idx.HasValue)
         return null;
 
-    int p1Idx = startBar;
-    int p2Idx = _lastP2Idx.Value;
-    int p3Idx = _lastP3Idx.Value;
+	int p1Idx = startBar;
+	int p2Idx = _lastP2Idx.Value;
+	int p3Idx = _lastP3Idx.Value;
+	
+	// Repair degenerate P2 when the tool reports P1 == P2.
+	// For up containers, choose the highest high between P1 and P3.
+	// For down containers, choose the lowest low between P1 and P3.
+	if (p2Idx <= p1Idx && p3Idx > p1Idx)
+	{
+	    int repairedP2 = p1Idx;
+	
+	    if (isUpContainer)
+	    {
+	        double bestHigh = chartBars.Bars.GetHigh(p1Idx);
+	
+	        for (int i = p1Idx + 1; i <= p3Idx; i++)
+	        {
+	            double h = chartBars.Bars.GetHigh(i);
+	            if (h > bestHigh)
+	            {
+	                bestHigh = h;
+	                repairedP2 = i;
+	            }
+	        }
+	    }
+	    else
+	    {
+	        double bestLow = chartBars.Bars.GetLow(p1Idx);
+	
+	        for (int i = p1Idx + 1; i <= p3Idx; i++)
+	        {
+	            double l = chartBars.Bars.GetLow(i);
+	            if (l < bestLow)
+	            {
+	                bestLow = l;
+	                repairedP2 = i;
+	            }
+	        }
+	    }
+	
+	    p2Idx = repairedP2;
+	}
+	
+	Print($"[CustomLine-IdxRaw] startBar={startBar} p2={_lastP2Idx} p3={_lastP3Idx}");
+	Print($"[CustomLine-IdxFixed] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
+	
+	if (!(p1Idx < p2Idx && p2Idx < p3Idx))
+	{
+	    Print($"[CustomLine-BadOrder] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
+	    return null;
+	}
 
     double p1Price = (double)startPriceDec;
     double p2Price = GetPriceAtBar(chartBars, p2Idx, isUpContainer ? true : false);
