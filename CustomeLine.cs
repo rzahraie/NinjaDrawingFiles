@@ -176,7 +176,40 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 
     Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
     PrintManualContainerSnapshot(snapshot.Value);
-    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(snapshot.Value);
+    var analysis =
+	    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerAnalyzer.Analyze(
+	        snapshot.Value,
+	        idx => chartBars.Bars.GetOpen(idx),
+	        idx => chartBars.Bars.GetHigh(idx),
+	        idx => chartBars.Bars.GetLow(idx),
+	        idx => chartBars.Bars.GetClose(idx),
+	        idx => (long)chartBars.Bars.GetVolume(idx),
+	        chartBars.Bars.Instrument.MasterInstrument.TickSize);
+	
+	Print($"[ManualAnalysis] C#{analysis.Snapshot.ContainerId} volCount={analysis.VolumeEvents.Length}");
+
+	if (analysis.FttCandidateBar.HasValue)
+	    Print($"[ManualAnalysis] Candidate={analysis.FttCandidateBar.Value}");
+	
+	if (analysis.FttConfirmedBar.HasValue)
+	    Print($"[ManualAnalysis] Confirmed={analysis.FttConfirmedBar.Value}");
+	
+	if (analysis.StructureState.HasValue)
+	    Print($"[ManualAnalysis] Structure={analysis.StructureState.Value}");
+	
+	if (analysis.ActionType.HasValue)
+	    Print($"[ManualAnalysis] Action={analysis.ActionType.Value}");
+	
+	if (analysis.TradeIntent.HasValue)
+	    Print($"[ManualAnalysis] TradeIntent={analysis.TradeIntent.Value}");
+	
+	for (int i = 0; i < analysis.VolumeEvents.Length; i++)
+	{
+	    var ve = analysis.VolumeEvents[i];
+	    Print($"[ManualAnalysis] Vol {ve.Label} bar={ve.BarIndex} vol={ve.Volume} pol={ve.Polarity}");
+	}
+
+	NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 }
 
  private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
@@ -232,9 +265,6 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 	    p2Idx = repairedP2;
 	}
 	
-	Print($"[CustomLine-IdxRaw] startBar={startBar} p2={_lastP2Idx} p3={_lastP3Idx}");
-	Print($"[CustomLine-IdxFixed] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
-	
 	if (!(p1Idx < p2Idx && p2Idx < p3Idx))
 	{
 	    Print($"[CustomLine-BadOrder] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
@@ -285,6 +315,33 @@ private void PrintManualContainerSnapshot(
         snapshot.P3.Price,
         snapshot.RtlSlope,
         snapshot.LtlSlope));
+}
+
+private void PublishManualAnalysisIfReady(ChartControl chartControl, ChartBars chartBars)
+{
+    var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
+    if (!snapshot.HasValue)
+        return;
+
+    if (!ShouldPublishManualSnapshot(snapshot.Value))
+        return;
+
+	Print($"[CustomLine-IdxRaw] startBar={startBar} p2={_lastP2Idx} p3={_lastP3Idx}");
+	Print($"[CustomLine-IdxFixed] p1={snapshot.Value.P1.BarIndex} p2={snapshot.Value.P2.BarIndex} p3={snapshot.Value.P3.BarIndex}");
+    Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
+    PrintManualContainerSnapshot(snapshot.Value);
+
+    var analysis =
+	    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerAnalyzer.Analyze(
+	        snapshot.Value,
+	        idx => chartBars.Bars.GetOpen(idx),
+	        idx => chartBars.Bars.GetHigh(idx),
+	        idx => chartBars.Bars.GetLow(idx),
+	        idx => chartBars.Bars.GetClose(idx),
+	        idx => (long)chartBars.Bars.GetVolume(idx),
+	        chartBars.Bars.Instrument.MasterInstrument.TickSize);
+
+    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 }
 
 private double GetPriceAtBar(ChartBars chartBars, int barIdx, bool useHigh)
@@ -1386,6 +1443,8 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
    EndAnchor.SlotIndex = rtlEndPointX; // NEW
    VeEndAnchor.SlotIndex = rtlEndPointX; // NEW (keeps the handle visually on the same bar)
 
+   PublishManualSnapshotIfReady(chartControl, bars);
+   
    if (AutoExtend) StartAutoExtend();
    
    var chartBars = GetBarsForAnchors(chartControl);
@@ -1396,7 +1455,18 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
 	    {
 	        Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
 	        PrintManualContainerSnapshot(snapshot.Value);
-	        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(snapshot.Value);
+	
+	        var analysis =
+		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerAnalyzer.Analyze(
+		        snapshot.Value,
+		        idx => chartBars.Bars.GetOpen(idx),
+		        idx => chartBars.Bars.GetHigh(idx),
+		        idx => chartBars.Bars.GetLow(idx),
+		        idx => chartBars.Bars.GetClose(idx),
+		        idx => (long)chartBars.Bars.GetVolume(idx),
+		        chartBars.Bars.Instrument.MasterInstrument.TickSize);
+	
+	        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 	    }
    }
  }
@@ -1997,6 +2067,10 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  _lastSlope = newSlope;
  
  UpdateVeAnchorsFromLastSegment(chartControl);
+ 
+ /*var barsNow = GetActiveBars(chartControl, chartScale);
+ if (barsNow != null)
+    PublishManualSnapshotIfReady(chartControl, barsNow);*/
  
  PrintDebug($"RTL eIdx={_lastEIdx} EndAnchor.SlotIndex={EndAnchor.SlotIndex} VE eIdx={VeEndAnchor.SlotIndex}");
  
