@@ -206,10 +206,44 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 	for (int i = 0; i < analysis.VolumeEvents.Length; i++)
 	{
 	    var ve = analysis.VolumeEvents[i];
-	    Print($"[ManualAnalysis] Vol {ve.Label} bar={ve.BarIndex} vol={ve.Volume} pol={ve.Polarity}");
+	    Print($"[ManualAnalysis] Vol {ve.Label} bar={ve.BarIndex} vol={ve.Volume} pol={ve.Polarity} dom={ve.Dominance}");
 	}
 
-	NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
+	Print($"[ManualAnalysis] Seq {analysis.VolumeSequence.SequenceText}");
+	Print($"[ManualAnalysis] SeqFlags domShift={analysis.VolumeSequence.HasDominantShift} " +
+      $"ndReturn={analysis.VolumeSequence.HasNonDominantReturn} mixed={analysis.VolumeSequence.IsMixed}");
+	
+	Print($"[ManualAnalysis] VolState={analysis.VolumeState}");
+	
+	Print($"[ManualAnalysis] FlipCount={analysis.VolumeSequence.FlipCount}");
+	
+	bool mixed = analysis.VolumeSequence.IsMixed;
+	bool domShift = analysis.VolumeSequence.HasDominantShift;
+	bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
+	int flipCount = analysis.VolumeSequence.FlipCount;
+	
+	bool isTradable =
+	    flipCount <= 3 &&
+	    !mixed &&
+	    (domShift || !ndReturn);
+	
+	string signal = "SKIP";
+	
+	if (isTradable && analysis.FttConfirmedBar.HasValue)
+	{
+	    if (analysis.Snapshot.IsUpContainer)
+	        signal = "LONG";
+	    else
+	        signal = "SHORT";
+	}
+	
+	Print(
+	    $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
+	    $"Signal={signal} " +
+	    $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
+	    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
+		
+		NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 }
 
  private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
@@ -1762,86 +1796,91 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  
  private void ExtendRTL(ChartControl chartControl, ChartScale chartScale)
  {
- if (_isExtending) return;
+		 if (_isExtending) return;
+		 
+		 var bars = GetBarsForAnchors(chartControl);
+		 if (bars == null || bars.Count < 2) return;
+		 
+		 // Where the RTL end is right now (prefer caches, else floor by time)
+		 int currIdx =
+		 (rtlEndPointX >= 0 && rtlEndPointX < bars.Count) ? rtlEndPointX :
+		 (_lastEIdx.HasValue && _lastEIdx.Value >= 0 && _lastEIdx.Value < bars.Count) ? _lastEIdx.Value :
+		 IndexAtOrBefore(bars, chartControl, EndAnchor.Time);
+		 
+		 int lastIdx = bars.Count - 1;
+		 
+		 // P1 index (floor), used for slope and y-projection
+		 int sIdx = _lastSIdx ?? IndexAtOrBefore(bars, chartControl, StartAnchor.Time);
+		 if (sIdx < 0) sIdx = 0;
+		 
+		 // Keep using the cached slope when available (prevents veer)
+		 double slope = (_lastSIdx.HasValue && _lastEIdx.HasValue && _lastEIdx.Value != _lastSIdx.Value)
+		 ? _lastSlope
+		 : (EndAnchor.Price - StartAnchor.Price) / Math.Max(1, (currIdx - sIdx));
+		 
+		 int newIdx = currIdx + 1;
+		 
+		 // ===== CASE 1: already at / beyond the last bar → snap cleanly to last bar =====
+		 if (currIdx >= lastIdx)
+		 {
+			 DateTime lastTm = bars.GetTimeByBarIdx(chartControl, lastIdx);
+			 double price = StartAnchor.Price + slope * (lastIdx - sIdx);
+			 
+			 try
+			 {
+				 _isExtending = true;
+				 
+				 EndAnchor.Time = lastTm;
+				 EndAnchor.Price = price;
+				 
+				 EndAnchor.SlotIndex = (currIdx >= lastIdx) ? lastIdx : newIdx; // NEW
+				 StartAnchor.SlotIndex = sIdx; // NEW
+				 
+				 rtlEndPointX = lastIdx;
+				 rtlEndPointPrice = price;
+				 _lastEIdx = lastIdx;
+				 lineSlope = slope;
+			 }
+			 finally { _isExtending = false; }
+			 
+			 PrintDebug($"Snapped RTL to last bar {lastIdx} @ {EndAnchor.Price}");
+			 CalculateLTLCoordinates(chartControl, chartScale);
+			 //DeferInvalidate(chartControl);
+			 RequestRepaint(chartControl);
+			 
+			 return;
+ 		}
  
- var bars = GetBarsForAnchors(chartControl);
- if (bars == null || bars.Count < 2) return;
- 
- // Where the RTL end is right now (prefer caches, else floor by time)
- int currIdx =
- (rtlEndPointX >= 0 && rtlEndPointX < bars.Count) ? rtlEndPointX :
- (_lastEIdx.HasValue && _lastEIdx.Value >= 0 && _lastEIdx.Value < bars.Count) ? _lastEIdx.Value :
- IndexAtOrBefore(bars, chartControl, EndAnchor.Time);
- 
- int lastIdx = bars.Count - 1;
- 
- // P1 index (floor), used for slope and y-projection
- int sIdx = _lastSIdx ?? IndexAtOrBefore(bars, chartControl, StartAnchor.Time);
- if (sIdx < 0) sIdx = 0;
- 
- // Keep using the cached slope when available (prevents veer)
- double slope = (_lastSIdx.HasValue && _lastEIdx.HasValue && _lastEIdx.Value != _lastSIdx.Value)
- ? _lastSlope
- : (EndAnchor.Price - StartAnchor.Price) / Math.Max(1, (currIdx - sIdx));
- 
- int newIdx = currIdx + 1;
- 
- // ===== CASE 1: already at / beyond the last bar → snap cleanly to last bar =====
- if (currIdx >= lastIdx)
- {
- DateTime lastTm = bars.GetTimeByBarIdx(chartControl, lastIdx);
- double price = StartAnchor.Price + slope * (lastIdx - sIdx);
- 
- try
- {
- _isExtending = true;
- 
- EndAnchor.Time = lastTm;
- EndAnchor.Price = price;
- 
- EndAnchor.SlotIndex = (currIdx >= lastIdx) ? lastIdx : newIdx; // NEW
- StartAnchor.SlotIndex = sIdx; // NEW
- 
- rtlEndPointX = lastIdx;
- rtlEndPointPrice = price;
- _lastEIdx = lastIdx;
- lineSlope = slope;
- }
- finally { _isExtending = false; }
- 
- PrintDebug($"Snapped RTL to last bar {lastIdx} @ {EndAnchor.Price}");
- CalculateLTLCoordinates(chartControl, chartScale);
- //DeferInvalidate(chartControl);
- RequestRepaint(chartControl);
- return;
- }
- 
- // ===== CASE 2: normal extend by one bar =====
- 
- DateTime tm = bars.GetTimeByBarIdx(chartControl, newIdx);
- double priceN = StartAnchor.Price + slope * (newIdx - sIdx);
- 
- try
- {
- _isExtending = true;
- 
- EndAnchor.Time = tm;
- EndAnchor.Price = priceN;
- 
- EndAnchor.SlotIndex = (currIdx >= lastIdx) ? lastIdx : newIdx; // NEW
- StartAnchor.SlotIndex = sIdx; // NEW
- 
- rtlEndPointX = newIdx;
- rtlEndPointPrice = priceN;
- _lastEIdx = newIdx;
- lineSlope = slope;
- }
- finally { _isExtending = false; }
- 
- PrintDebug($"Extend from {currIdx} → {newIdx} @ {EndAnchor.Price}");
- CalculateLTLCoordinates(chartControl, chartScale);
- //DeferInvalidate(chartControl);
- RequestRepaint(chartControl);
+		 // ===== CASE 2: normal extend by one bar =====
+		 
+		 DateTime tm = bars.GetTimeByBarIdx(chartControl, newIdx);
+		 double priceN = StartAnchor.Price + slope * (newIdx - sIdx);
+		 
+		 try
+		 {
+		 _isExtending = true;
+		 
+		 EndAnchor.Time = tm;
+		 EndAnchor.Price = priceN;
+		 
+		 EndAnchor.SlotIndex = (currIdx >= lastIdx) ? lastIdx : newIdx; // NEW
+		 StartAnchor.SlotIndex = sIdx; // NEW
+		 
+		 rtlEndPointX = newIdx;
+		 rtlEndPointPrice = priceN;
+		 _lastEIdx = newIdx;
+		 lineSlope = slope;
+		 }
+		 finally { _isExtending = false; }
+		 
+		 PrintDebug($"Extend from {currIdx} → {newIdx} @ {EndAnchor.Price}");
+		 CalculateLTLCoordinates(chartControl, chartScale);
+		 //DeferInvalidate(chartControl);
+		 RequestRepaint(chartControl);
+		 
+		  var barsNow = GetActiveBars(chartControl, chartScale);
+		  if (barsNow != null)
+			  PublishManualSnapshotIfReady(chartControl, barsNow);
  }
  
  private void ExtendRTLOld(ChartControl chartControl, ChartScale chartScale)
