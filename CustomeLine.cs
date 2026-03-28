@@ -140,19 +140,64 @@ private int? _lastPublishedP2Idx = null;
 private int? _lastPublishedP3Idx = null;
 private double? _lastPublishedP2Price = null;
 private double? _lastPublishedP3Price = null;
+private int? _lastPublishedEndIdx = null;
+private double? _lastPublishedEndPrice = null;
+private int? _lastPublishedAnalysisEndIdx = null;
+private int? _lastPublishedCandidateBar = null;
+private int? _lastPublishedConfirmedBar = null;
+private int? _lastPublishedFlipCount = null;
+private int? _lastPublishedVolCount = null;
+ 
+ private bool ShouldPublishManualAnalysis(
+    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis)
+{
+    int analysisEndIdx = analysis.Snapshot.AnalysisEndBarIndex;
+    int? candidateBar = analysis.FttCandidateBar;
+    int? confirmedBar = analysis.FttConfirmedBar;
+    int flipCount = analysis.VolumeSequence.FlipCount;
+    int volCount = analysis.VolumeEvents != null ? analysis.VolumeEvents.Length : 0;
+
+    bool same =
+        _lastPublishedAnalysisEndIdx.HasValue &&
+        _lastPublishedCandidateBar == candidateBar &&
+        _lastPublishedConfirmedBar == confirmedBar &&
+        _lastPublishedFlipCount.HasValue &&
+        _lastPublishedVolCount.HasValue &&
+        _lastPublishedAnalysisEndIdx.Value == analysisEndIdx &&
+        _lastPublishedFlipCount.Value == flipCount &&
+        _lastPublishedVolCount.Value == volCount;
+
+    if (same)
+        return false;
+
+    _lastPublishedAnalysisEndIdx = analysisEndIdx;
+    _lastPublishedCandidateBar = candidateBar;
+    _lastPublishedConfirmedBar = confirmedBar;
+    _lastPublishedFlipCount = flipCount;
+    _lastPublishedVolCount = volCount;
+
+    return true;
+}
  
  private bool ShouldPublishManualSnapshot(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot snapshot)
 {
+    int currentEndIdx = _lastEIdx ?? rtlEndPointX;
+    double currentEndPrice = rtlEndPointPrice;
+
     bool same =
         _lastPublishedP2Idx.HasValue &&
         _lastPublishedP3Idx.HasValue &&
         _lastPublishedP2Price.HasValue &&
         _lastPublishedP3Price.HasValue &&
+        _lastPublishedEndIdx.HasValue &&
+        _lastPublishedEndPrice.HasValue &&
         _lastPublishedP2Idx.Value == snapshot.P2.BarIndex &&
         _lastPublishedP3Idx.Value == snapshot.P3.BarIndex &&
         _lastPublishedP2Price.Value == snapshot.P2.Price &&
-        _lastPublishedP3Price.Value == snapshot.P3.Price;
+        _lastPublishedP3Price.Value == snapshot.P3.Price &&
+        _lastPublishedEndIdx.Value == currentEndIdx &&
+        _lastPublishedEndPrice.Value == currentEndPrice;
 
     if (same)
         return false;
@@ -161,6 +206,8 @@ private double? _lastPublishedP3Price = null;
     _lastPublishedP3Idx = snapshot.P3.BarIndex;
     _lastPublishedP2Price = snapshot.P2.Price;
     _lastPublishedP3Price = snapshot.P3.Price;
+    _lastPublishedEndIdx = currentEndIdx;
+    _lastPublishedEndPrice = currentEndPrice;
 
     return true;
 }
@@ -185,6 +232,9 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 	        idx => chartBars.Bars.GetClose(idx),
 	        idx => (long)chartBars.Bars.GetVolume(idx),
 	        chartBars.Bars.Instrument.MasterInstrument.TickSize);
+	
+	if (!ShouldPublishManualAnalysis(analysis))
+    	return;
 	
 	Print($"[ManualAnalysis] C#{analysis.Snapshot.ContainerId} volCount={analysis.VolumeEvents.Length}");
 
@@ -321,6 +371,9 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
     ExtendBreakRule == BreakMode.CloseCross
         ? NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.CloseCross
         : NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.HighLowPenetration;
+	
+	int analysisEndIdx = _lastEIdx ?? rtlEndPointX;
+	double analysisEndPrice = rtlEndPointPrice;
 
 	return new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot(
 	    containerId: p1Idx,
@@ -331,7 +384,9 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 	    rtlSlope: rtlSlope,
 	    ltlSlope: ltlSlope,
 	    breakMode: breakMode,
-	    breakToleranceTicks: 0.0);
+	    breakToleranceTicks: 0.0,
+		analysisEndBarIndex: analysisEndIdx,
+    	analysisEndPrice: analysisEndPrice);
 }
 
 private void PrintManualContainerSnapshot(
