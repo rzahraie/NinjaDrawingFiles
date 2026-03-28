@@ -97,6 +97,7 @@
  private CommandBinding extendCommandBindingWin;
  private bool _recalcAfterReloadTried = false;
  private Window activeChartWindow;
+ private ChartScale _lastChartScale = null;
  
  /// <summary>
  /// Channel numbers (i.e. points 1,2,3)
@@ -147,9 +148,12 @@ private int? _lastPublishedCandidateBar = null;
 private int? _lastPublishedConfirmedBar = null;
 private int? _lastPublishedFlipCount = null;
 private int? _lastPublishedVolCount = null;
- 
- private bool ShouldPublishManualAnalysis(
-    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis)
+private string _lastPublishedSignal = null;
+private bool _publishInProgress = false;
+
+private bool ShouldPublishManualAnalysis(
+    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
+    string signal)
 {
     int analysisEndIdx = analysis.Snapshot.AnalysisEndBarIndex;
     int? candidateBar = analysis.FttCandidateBar;
@@ -163,9 +167,11 @@ private int? _lastPublishedVolCount = null;
         _lastPublishedConfirmedBar == confirmedBar &&
         _lastPublishedFlipCount.HasValue &&
         _lastPublishedVolCount.HasValue &&
+        _lastPublishedSignal != null &&
         _lastPublishedAnalysisEndIdx.Value == analysisEndIdx &&
         _lastPublishedFlipCount.Value == flipCount &&
-        _lastPublishedVolCount.Value == volCount;
+        _lastPublishedVolCount.Value == volCount &&
+        _lastPublishedSignal == signal;
 
     if (same)
         return false;
@@ -175,11 +181,12 @@ private int? _lastPublishedVolCount = null;
     _lastPublishedConfirmedBar = confirmedBar;
     _lastPublishedFlipCount = flipCount;
     _lastPublishedVolCount = volCount;
+    _lastPublishedSignal = signal;
 
     return true;
-}
+} 
  
- private bool ShouldPublishManualSnapshot(
+private bool ShouldPublishManualSnapshot(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot snapshot)
 {
     int currentEndIdx = _lastEIdx ?? rtlEndPointX;
@@ -212,8 +219,101 @@ private int? _lastPublishedVolCount = null;
     return true;
 }
 
+
 private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars chartBars)
 {
+    if (_publishInProgress)
+        return;
+
+    _publishInProgress = true;
+
+    try
+    {
+        var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
+        if (!snapshot.HasValue)
+            return;
+
+        if (!ShouldPublishManualSnapshot(snapshot.Value))
+            return;
+
+        var analysis =
+            NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerAnalyzer.Analyze(
+                snapshot.Value,
+                idx => chartBars.Bars.GetOpen(idx),
+                idx => chartBars.Bars.GetHigh(idx),
+                idx => chartBars.Bars.GetLow(idx),
+                idx => chartBars.Bars.GetClose(idx),
+                idx => (long)chartBars.Bars.GetVolume(idx),
+                chartBars.Bars.Instrument.MasterInstrument.TickSize);
+
+        bool mixed = analysis.VolumeSequence.IsMixed;
+        bool domShift = analysis.VolumeSequence.HasDominantShift;
+        bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
+        int flipCount = analysis.VolumeSequence.FlipCount;
+
+        bool isTradable =
+            flipCount <= 3 &&
+            !mixed &&
+            (domShift || !ndReturn);
+
+        string signal = "SKIP";
+
+        if (isTradable && analysis.FttConfirmedBar.HasValue)
+            signal = analysis.Snapshot.IsUpContainer ? "LONG" : "SHORT";
+
+        if (!ShouldPublishManualAnalysis(analysis, signal))
+            return;
+
+        Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
+        PrintManualContainerSnapshot(snapshot.Value);
+
+        Print($"[ManualAnalysis] C#{analysis.Snapshot.ContainerId} volCount={analysis.VolumeEvents.Length}");
+        if (analysis.FttCandidateBar.HasValue)
+            Print($"[ManualAnalysis] Candidate={analysis.FttCandidateBar.Value}");
+        if (analysis.FttConfirmedBar.HasValue)
+            Print($"[ManualAnalysis] Confirmed={analysis.FttConfirmedBar.Value}");
+        if (analysis.StructureState.HasValue)
+            Print($"[ManualAnalysis] Structure={analysis.StructureState.Value}");
+        if (analysis.ActionType.HasValue)
+            Print($"[ManualAnalysis] Action={analysis.ActionType.Value}");
+        if (analysis.TradeIntent.HasValue)
+            Print($"[ManualAnalysis] TradeIntent={analysis.TradeIntent.Value}");
+
+        for (int i = 0; i < analysis.VolumeEvents.Length; i++)
+        {
+            var ve = analysis.VolumeEvents[i];
+            Print($"[ManualAnalysis] Vol {ve.Label} bar={ve.BarIndex} vol={ve.Volume} pol={ve.Polarity} dom={ve.Dominance}");
+        }
+
+        Print($"[ManualAnalysis] Seq {analysis.VolumeSequence.SequenceText}");
+        Print($"[ManualAnalysis] SeqFlags domShift={analysis.VolumeSequence.HasDominantShift} ndReturn={analysis.VolumeSequence.HasNonDominantReturn} mixed={analysis.VolumeSequence.IsMixed}");
+        Print($"[ManualAnalysis] VolState={analysis.VolumeState}");
+        Print($"[ManualAnalysis] FlipCount={analysis.VolumeSequence.FlipCount}");
+
+        Print(
+            $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
+            $"Signal={signal} " +
+            $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
+            $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
+
+        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
+    }
+    finally
+    {
+        _publishInProgress = false;
+    }
+}
+
+/*private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars chartBars)
+{
+	if (_publishInProgress)
+	{
+	    _pendingPublish = true;
+	    return;
+	}
+	
+	_publishInProgress = true;
+
     var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
     if (!snapshot.HasValue)
         return;
@@ -287,14 +387,31 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 	        signal = "SHORT";
 	}
 	
+	if (!ShouldPublishManualAnalysis(analysis, signal))
+    	return;
+	
 	Print(
 	    $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
 	    $"Signal={signal} " +
 	    $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
 	    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
 		
-		NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
-}
+	NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
+	
+	_publishInProgress = false;
+
+	if (_pendingPublish)
+	{
+	    _pendingPublish = false;
+	
+		if (_lastChartScale == null)
+			return;
+		
+	    var barsNow = GetActiveBars(chartControl, _lastChartScale);
+	    if (barsNow != null)
+	        PublishManualSnapshotIfReady(chartControl, barsNow);
+	}
+}*/
 
  private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
     ChartControl chartControl,
@@ -490,6 +607,19 @@ void FreezeStartAnchor(ChartAnchor a, ChartControl cc, ChartBars cb)
     }
 
     startFrozen = true;
+	
+	_lastPublishedP2Idx = null;
+	_lastPublishedP3Idx = null;
+	_lastPublishedP2Price = null;
+	_lastPublishedP3Price = null;
+	_lastPublishedEndIdx = null;
+	_lastPublishedEndPrice = null;
+	_lastPublishedAnalysisEndIdx = null;
+	_lastPublishedCandidateBar = null;
+	_lastPublishedConfirmedBar = null;
+	_lastPublishedFlipCount = null;
+	_lastPublishedVolCount = null;
+	_lastPublishedSignal = null;
 }
 
 
@@ -614,6 +744,12 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  {
  if (DebugLogs)
  PrintDebug($"[CustomLine] {messageFactory()}");
+ }
+ 
+ private void PrintDebugEx(Func<string> messageFactory)
+ {
+ if (DebugLogs)
+ PrintDebug(messageFactory());
  }
  // ==========================================================
  
@@ -1532,32 +1668,11 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
    EndAnchor.SlotIndex = rtlEndPointX; // NEW
    VeEndAnchor.SlotIndex = rtlEndPointX; // NEW (keeps the handle visually on the same bar)
 
-   PublishManualSnapshotIfReady(chartControl, bars);
+   
    
    if (AutoExtend) StartAutoExtend();
    
-   var chartBars = GetBarsForAnchors(chartControl);
-   var snapshot = BuildManualContainerSnapshot(chartControl, chartBars);
-   if (snapshot.HasValue)
-   {
-	    if (ShouldPublishManualSnapshot(snapshot.Value))
-	    {
-	        Print($"[CustomLine] startFrozen={startFrozen} p2={_lastP2Idx} p3={_lastP3Idx} up={isUpContainer}");
-	        PrintManualContainerSnapshot(snapshot.Value);
-	
-	        var analysis =
-		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerAnalyzer.Analyze(
-		        snapshot.Value,
-		        idx => chartBars.Bars.GetOpen(idx),
-		        idx => chartBars.Bars.GetHigh(idx),
-		        idx => chartBars.Bars.GetLow(idx),
-		        idx => chartBars.Bars.GetClose(idx),
-		        idx => (long)chartBars.Bars.GetVolume(idx),
-		        chartBars.Bars.Instrument.MasterInstrument.TickSize);
-	
-	        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
-	    }
-   }
+   PublishManualSnapshotIfReady(chartControl, bars);
  }
  
  public override void OnEdited(ChartControl chartControl, ChartPanel chartPanel, ChartScale chartScale, DrawingTool oldinstance)
@@ -1573,6 +1688,8 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  public override void OnRender(ChartControl chartControl, ChartScale chartScale)
  {
  if (_isExtending) return;
+ 
+ _lastChartScale = chartScale;
  
  if (chartControl == null || chartScale == null || RenderTarget == null) return;
  if (LineStroke == null || StartAnchor == null || EndAnchor == null) return;
@@ -1933,8 +2050,11 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
 		 //DeferInvalidate(chartControl);
 		 RequestRepaint(chartControl);
 		 
-		  var barsNow = GetActiveBars(chartControl, chartScale);
-		  if (barsNow != null)
+		 if (_lastChartScale == null)
+    		return;
+		 
+		 var barsNow = GetActiveBars(chartControl, _lastChartScale);
+		 if (barsNow != null)
 			  PublishManualSnapshotIfReady(chartControl, barsNow);
  }
  
@@ -2161,10 +2281,6 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  _lastSlope = newSlope;
  
  UpdateVeAnchorsFromLastSegment(chartControl);
- 
- /*var barsNow = GetActiveBars(chartControl, chartScale);
- if (barsNow != null)
-    PublishManualSnapshotIfReady(chartControl, barsNow);*/
  
  PrintDebug($"RTL eIdx={_lastEIdx} EndAnchor.SlotIndex={EndAnchor.SlotIndex} VE eIdx={VeEndAnchor.SlotIndex}");
  
