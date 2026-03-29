@@ -162,16 +162,14 @@ private bool ShouldPublishManualAnalysis(
     int volCount = analysis.VolumeEvents != null ? analysis.VolumeEvents.Length : 0;
 
     bool same =
-        _lastPublishedAnalysisEndIdx.HasValue &&
-        _lastPublishedCandidateBar == candidateBar &&
-        _lastPublishedConfirmedBar == confirmedBar &&
-        _lastPublishedFlipCount.HasValue &&
-        _lastPublishedVolCount.HasValue &&
-        _lastPublishedSignal != null &&
-        _lastPublishedAnalysisEndIdx.Value == analysisEndIdx &&
-        _lastPublishedFlipCount.Value == flipCount &&
-        _lastPublishedVolCount.Value == volCount &&
-        _lastPublishedSignal == signal;
+	    _lastPublishedCandidateBar == candidateBar &&
+	    _lastPublishedConfirmedBar == confirmedBar &&
+	    _lastPublishedFlipCount.HasValue &&
+	    _lastPublishedVolCount.HasValue &&
+	    _lastPublishedSignal != null &&
+	    _lastPublishedFlipCount.Value == flipCount &&
+	    _lastPublishedVolCount.Value == volCount &&
+	    _lastPublishedSignal == signal;
 
     if (same)
         return false;
@@ -247,19 +245,41 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
                 chartBars.Bars.Instrument.MasterInstrument.TickSize);
 
         bool mixed = analysis.VolumeSequence.IsMixed;
-        bool domShift = analysis.VolumeSequence.HasDominantShift;
-        bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
-        int flipCount = analysis.VolumeSequence.FlipCount;
-
-        bool isTradable =
-            flipCount <= 3 &&
-            !mixed &&
-            (domShift || !ndReturn);
-
-        string signal = "SKIP";
-
-        if (isTradable && analysis.FttConfirmedBar.HasValue)
-            signal = analysis.Snapshot.IsUpContainer ? "LONG" : "SHORT";
+		bool domShift = analysis.VolumeSequence.HasDominantShift;
+		bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
+		int flipCount = analysis.VolumeSequence.FlipCount;
+		
+		bool isTradable = false;
+		
+		switch (analysis.VolumeState)
+		{
+		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.BalancedAlternation:
+		        isTradable = true;
+		        break;
+		
+		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.DominantPulse:
+		        isTradable = true;
+		        break;
+		
+		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.NonDominantReturn:
+		        isTradable = false;
+		        break;
+		
+		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.MixedChop:
+		        isTradable = false;
+		        break;
+		
+		    default:
+		        isTradable = false;
+		        break;
+		}
+		
+		string signal = "SKIP";
+		
+		if (isTradable && analysis.FttConfirmedBar.HasValue)
+		{
+		    signal = analysis.Snapshot.IsUpContainer ? "LONG" : "SHORT";
+		}
 
         if (!ShouldPublishManualAnalysis(analysis, signal))
             return;
@@ -291,17 +311,45 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
         Print($"[ManualAnalysis] FlipCount={analysis.VolumeSequence.FlipCount}");
 
         Print(
-            $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
-            $"Signal={signal} " +
-            $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
-            $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
-
-        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
-    }
-    finally
-    {
-        _publishInProgress = false;
-    }
+		    $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
+		    $"Signal={signal} " +
+		    $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
+		    $"End={analysis.Snapshot.AnalysisEndBarIndex} " +
+		    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
+		
+		Print( $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " + $"VolState={analysis.VolumeState} Tradable={isTradable}");
+		
+		double? entryPrice = null;
+		double? stopPrice = null;
+		double? riskPerUnit = null;
+		
+		if (analysis.FttConfirmedBar.HasValue)
+		{
+		    int confirmedIdx = analysis.FttConfirmedBar.Value;
+		
+		    entryPrice = chartBars.Bars.GetClose(confirmedIdx);
+		    stopPrice = analysis.Snapshot.P3.Price;
+		
+		    if (signal == "LONG")
+		        riskPerUnit = entryPrice.Value - stopPrice.Value;
+		    else if (signal == "SHORT")
+		        riskPerUnit = stopPrice.Value - entryPrice.Value;
+		}
+		
+		Print(
+		    $"[TradePlan] C#{analysis.Snapshot.ContainerId} " +
+		    $"Signal={signal} " +
+		    $"Entry={(entryPrice.HasValue ? entryPrice.Value.ToString() : "None")} " +
+		    $"Stop={(stopPrice.HasValue ? stopPrice.Value.ToString() : "None")} " +
+		    $"Risk={(riskPerUnit.HasValue ? riskPerUnit.Value.ToString() : "None")} " +
+		    $"VolState={analysis.VolumeState}");
+		
+		        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
+		    }
+		    finally
+		    {
+		        _publishInProgress = false;
+		    }
 }
 
 private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
@@ -498,19 +546,6 @@ void FreezeStartAnchor(ChartAnchor a, ChartControl cc, ChartBars cb)
     }
 
     startFrozen = true;
-	
-	_lastPublishedP2Idx = null;
-	_lastPublishedP3Idx = null;
-	_lastPublishedP2Price = null;
-	_lastPublishedP3Price = null;
-	_lastPublishedEndIdx = null;
-	_lastPublishedEndPrice = null;
-	_lastPublishedAnalysisEndIdx = null;
-	_lastPublishedCandidateBar = null;
-	_lastPublishedConfirmedBar = null;
-	_lastPublishedFlipCount = null;
-	_lastPublishedVolCount = null;
-	_lastPublishedSignal = null;
 }
 
 
@@ -1321,6 +1356,13 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
 				 StartAnchor.IsEditing = false;
 				 
 				 dataPoint.CopyDataValues(EndAnchor);
+				 
+				 _lastPublishedAnalysisEndIdx = null;
+				_lastPublishedCandidateBar = null;
+				_lastPublishedConfirmedBar = null;
+				_lastPublishedFlipCount = null;
+				_lastPublishedVolCount = null;
+				_lastPublishedSignal = null;
 			 }
 			 else if (EndAnchor.IsEditing)
 			 {
@@ -1341,32 +1383,33 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
 			    IsSelected = false;
 			 }
 		 break;
+			 
 		 case DrawingState.Normal:
-		 Point point = dataPoint.GetPoint(chartControl, chartPanel, chartScale);
-		 editingAnchor = GetClosestAnchor(chartControl, chartPanel, chartScale, cursorSensitivity, point);
-		 anchorPanelIndex = chartPanel.PanelIndex;
-		 
-		 if (editingAnchor != null)
-		 {
-		 editingAnchor.IsEditing = true;
-		 DrawingState = DrawingState.Editing;
-		 
-		 // keep P2 while user adjusts the RTL end
-		 _keepP2ThisPass = ( (editingAnchor == EndAnchor || editingAnchor == VeEndAnchor) && _lastP2Idx.HasValue );
-		 
-		 if (AutoExtend) StopAutoExtend();
-		 
-		 CalculateLTLCoordinates(chartControl, chartScale);
-		 }
-		 else
-		 {
-		 if (GetCursor(chartControl, chartPanel, chartScale, point) != null)
-		 {
-		 DrawingState = DrawingState.Moving;
-		 }
-		 else
-		 IsSelected = false;
-		 }
+			 Point point = dataPoint.GetPoint(chartControl, chartPanel, chartScale);
+			 editingAnchor = GetClosestAnchor(chartControl, chartPanel, chartScale, cursorSensitivity, point);
+			 anchorPanelIndex = chartPanel.PanelIndex;
+			 
+			 if (editingAnchor != null)
+			 {
+				 editingAnchor.IsEditing = true;
+				 DrawingState = DrawingState.Editing;
+				 
+				 // keep P2 while user adjusts the RTL end
+				 _keepP2ThisPass = ( (editingAnchor == EndAnchor || editingAnchor == VeEndAnchor) && _lastP2Idx.HasValue );
+				 
+				 if (AutoExtend) StopAutoExtend();
+				 
+				 CalculateLTLCoordinates(chartControl, chartScale);
+			 }
+			 else
+			 {
+			 if (GetCursor(chartControl, chartPanel, chartScale, point) != null)
+			 {
+			 DrawingState = DrawingState.Moving;
+			 }
+			 else
+			 IsSelected = false;
+			 }
 		 break;
 	 }
  
