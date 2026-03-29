@@ -250,15 +250,15 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		int flipCount = analysis.VolumeSequence.FlipCount;
 		
 		bool isTradable = false;
-		
+
 		switch (analysis.VolumeState)
 		{
 		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.BalancedAlternation:
-		        isTradable = true;
+		        isTradable = analysis.FttConfirmedBar.HasValue;
 		        break;
 		
 		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.DominantPulse:
-		        isTradable = true;
+		        isTradable = analysis.FttConfirmedBar.HasValue;
 		        break;
 		
 		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.NonDominantReturn:
@@ -313,9 +313,11 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
         Print(
 		    $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
 		    $"Signal={signal} " +
+		    $"Tradable={isTradable} " +
 		    $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
 		    $"End={analysis.Snapshot.AnalysisEndBarIndex} " +
-		    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn}");
+		    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn} " +
+		    $"VolState={analysis.VolumeState}");
 		
 		Print( $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " + $"VolState={analysis.VolumeState} Tradable={isTradable}");
 		
@@ -331,9 +333,19 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		    stopPrice = analysis.Snapshot.P3.Price;
 		
 		    if (signal == "LONG")
-		        riskPerUnit = entryPrice.Value - stopPrice.Value;
-		    else if (signal == "SHORT")
-		        riskPerUnit = stopPrice.Value - entryPrice.Value;
+			{
+			    if (stopPrice.HasValue && entryPrice.HasValue && stopPrice.Value < entryPrice.Value)
+			        riskPerUnit = entryPrice.Value - stopPrice.Value;
+			    else
+			        riskPerUnit = null;
+			}
+			else if (signal == "SHORT")
+			{
+			    if (stopPrice.HasValue && entryPrice.HasValue && stopPrice.Value > entryPrice.Value)
+			        riskPerUnit = stopPrice.Value - entryPrice.Value;
+			    else
+			        riskPerUnit = null;
+			}
 		}
 		
 		Print(
