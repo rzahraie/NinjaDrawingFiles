@@ -333,19 +333,28 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		    stopPrice = analysis.Snapshot.P3.Price;
 		
 		    if (signal == "LONG")
-			{
-			    if (stopPrice.HasValue && entryPrice.HasValue && stopPrice.Value < entryPrice.Value)
-			        riskPerUnit = entryPrice.Value - stopPrice.Value;
-			    else
-			        riskPerUnit = null;
-			}
-			else if (signal == "SHORT")
-			{
-			    if (stopPrice.HasValue && entryPrice.HasValue && stopPrice.Value > entryPrice.Value)
-			        riskPerUnit = stopPrice.Value - entryPrice.Value;
-			    else
-			        riskPerUnit = null;
-			}
+		    {
+		        if (stopPrice < entryPrice)
+		            riskPerUnit = entryPrice.Value - stopPrice.Value;
+		    }
+		    else if (signal == "SHORT")
+		    {
+		        if (stopPrice > entryPrice)
+		            riskPerUnit = stopPrice.Value - entryPrice.Value;
+		    }
+		}
+		
+		double? targetPrice = null;
+
+		if (riskPerUnit.HasValue && entryPrice.HasValue)
+		{
+		    double R = riskPerUnit.Value;
+		
+		    // 2R target (simple, deterministic)
+		    if (signal == "LONG")
+		        targetPrice = entryPrice.Value + 2.0 * R;
+		    else if (signal == "SHORT")
+				targetPrice = entryPrice.Value - 2.0 * R;
 		}
 		
 		Print(
@@ -353,6 +362,7 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		    $"Signal={signal} " +
 		    $"Entry={(entryPrice.HasValue ? entryPrice.Value.ToString() : "None")} " +
 		    $"Stop={(stopPrice.HasValue ? stopPrice.Value.ToString() : "None")} " +
+		    $"Target={(targetPrice.HasValue ? targetPrice.Value.ToString() : "None")} " +
 		    $"Risk={(riskPerUnit.HasValue ? riskPerUnit.Value.ToString() : "None")} " +
 		    $"VolState={analysis.VolumeState}");
 		
