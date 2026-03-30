@@ -388,6 +388,21 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	int p2Idx = _lastP2Idx.Value;
 	int p3Idx = _lastP3Idx.Value;
 	
+	var containerKind = NinjaTrader.NinjaScript.xPva.Engine.ContainerKind.Tape;
+	
+	bool validOrder;
+
+	if (containerKind == NinjaTrader.NinjaScript.xPva.Engine.ContainerKind.Tape)
+	    validOrder = (p1Idx <= p2Idx && p2Idx < p3Idx);
+	else
+	    validOrder = (p1Idx < p2Idx && p2Idx < p3Idx);
+	
+	if (!validOrder)
+	{
+	    Print($"[CustomLine-BadOrder] kind={containerKind} p1={p1Idx} p2={p2Idx} p3={p3Idx}");
+	    return null;
+	}
+	
 	// Repair degenerate P2 when the tool reports P1 == P2.
 	// For up containers, choose the highest high between P1 and P3.
 	// For down containers, choose the lowest low between P1 and P3.
@@ -427,11 +442,7 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	    p2Idx = repairedP2;
 	}
 	
-	if (!(p1Idx < p2Idx && p2Idx < p3Idx))
-	{
-	    Print($"[CustomLine-BadOrder] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
-	    return null;
-	}
+	
 
     double p1Price = (double)startPriceDec;
     double p2Price = GetPriceAtBar(chartBars, p2Idx, isUpContainer ? true : false);
@@ -455,6 +466,7 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 
 	return new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot(
 	    containerId: p1Idx,
+		kind: containerKind,
 	    isUpContainer: isUpContainer,
 	    p1: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p1Idx, p1Price),
 	    p2: new NinjaTrader.NinjaScript.xPva.Engine.ManualContainerPoint(p2Idx, p2Price),
@@ -471,8 +483,9 @@ private void PrintManualContainerSnapshot(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot snapshot)
 {
     Print(string.Format(
-        "ManualContainer C#{0} dir={1} P1=({2},{3}) P2=({4},{5}) P3=({6},{7}) rtlSlope={8} ltlSlope={9}",
+        "ManualContainer C#{0} kind={1} dir={2} P1=({3},{4}) P2=({5},{6}) P3=({7},{8}) rtlSlope={9} ltlSlope={10}",
         snapshot.ContainerId,
+		snapshot.Kind,
         snapshot.IsUpContainer ? "Up" : "Down",
         snapshot.P1.BarIndex,
         snapshot.P1.Price,
