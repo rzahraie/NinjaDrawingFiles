@@ -389,19 +389,21 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	int p3Idx = _lastP3Idx.Value;
 	
 	var containerKind = NinjaTrader.NinjaScript.xPva.Engine.ContainerKind.Tape;
+	var breakMode = NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.CloseCross;
 	
-	bool validOrder;
+	bool validOrder = (p1Idx < p2Idx && p2Idx < p3Idx);
 
-	if (containerKind == NinjaTrader.NinjaScript.xPva.Engine.ContainerKind.Tape)
-	    validOrder = (p1Idx <= p2Idx && p2Idx < p3Idx);
-	else
-	    validOrder = (p1Idx < p2Idx && p2Idx < p3Idx);
-	
 	if (!validOrder)
+	{
+	    Print($"[CustomLine-BadOrder] p1={p1Idx} p2={p2Idx} p3={p3Idx}");
+	    return null;
+	}
+	
+	/*if (!validOrder)
 	{
 	    Print($"[CustomLine-BadOrder] kind={containerKind} p1={p1Idx} p2={p2Idx} p3={p3Idx}");
 	    return null;
-	}
+	}*/
 	
 	// Repair degenerate P2 when the tool reports P1 == P2.
 	// For up containers, choose the highest high between P1 and P3.
@@ -456,10 +458,10 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
     // LTL is parallel to RTL and passes through P2
     double ltlSlope = rtlSlope;
 
-    var breakMode =
+    /*var breakMode =
     ExtendBreakRule == BreakMode.CloseCross
         ? NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.CloseCross
-        : NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.HighLowPenetration;
+        : NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.HighLowPenetration;*/
 	
 	int analysisEndIdx = _lastEIdx ?? rtlEndPointX;
 	double analysisEndPrice = rtlEndPointPrice;
