@@ -393,7 +393,7 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	var containerKind = NinjaTrader.NinjaScript.xPva.Engine.ContainerKind.Tape;
 	var breakMode = NinjaTrader.NinjaScript.xPva.Engine.ManualContainerBreakMode.CloseCross;
 	
-	bool validOrder = (p1Idx < p2Idx && p2Idx < p3Idx);
+	bool validOrder = (p1Idx <= p2Idx && p2Idx < p3Idx);
 
 	if (!validOrder)
 	{
@@ -410,7 +410,7 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	// Repair degenerate P2 when the tool reports P1 == P2.
 	// For up containers, choose the highest high between P1 and P3.
 	// For down containers, choose the lowest low between P1 and P3.
-	if (p2Idx <= p1Idx && p3Idx > p1Idx)
+	/*if (p2Idx <= p1Idx && p3Idx > p1Idx)
 	{
 	    int repairedP2 = p1Idx;
 	
@@ -444,7 +444,7 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	    }
 	
 	    p2Idx = repairedP2;
-	}
+	}*/
 	
 	
 
