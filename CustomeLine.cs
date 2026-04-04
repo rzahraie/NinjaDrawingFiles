@@ -162,14 +162,16 @@ private bool ShouldPublishManualAnalysis(
     int volCount = analysis.VolumeEvents != null ? analysis.VolumeEvents.Length : 0;
 
     bool same =
-	    _lastPublishedCandidateBar == candidateBar &&
-	    _lastPublishedConfirmedBar == confirmedBar &&
-	    _lastPublishedFlipCount.HasValue &&
-	    _lastPublishedVolCount.HasValue &&
-	    _lastPublishedSignal != null &&
-	    _lastPublishedFlipCount.Value == flipCount &&
-	    _lastPublishedVolCount.Value == volCount &&
-	    _lastPublishedSignal == signal;
+    _lastPublishedAnalysisEndIdx.HasValue &&
+    _lastPublishedCandidateBar == candidateBar &&
+    _lastPublishedConfirmedBar == confirmedBar &&
+    _lastPublishedFlipCount.HasValue &&
+    _lastPublishedVolCount.HasValue &&
+    _lastPublishedSignal != null &&
+    _lastPublishedAnalysisEndIdx.Value == analysisEndIdx &&
+    _lastPublishedFlipCount.Value == flipCount &&
+    _lastPublishedVolCount.Value == volCount &&
+    _lastPublishedSignal == signal;
 
     if (same)
         return false;
