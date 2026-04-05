@@ -153,6 +153,9 @@ private bool _publishInProgress = false;
  
 private NinjaTrader.NinjaScript.xPva.Engine.ManualSignalState _manualSignalState =
     new NinjaTrader.NinjaScript.xPva.Engine.ManualSignalState();
+ 
+private NinjaTrader.NinjaScript.xPva.Engine.ManualPositionState _manualPositionState =
+    new NinjaTrader.NinjaScript.xPva.Engine.ManualPositionState();
 
 private bool ShouldPublishManualAnalysis(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
@@ -351,7 +354,24 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		    $"Risk={(riskPerUnit.HasValue ? riskPerUnit.Value.ToString() : "None")} " +
 		    $"VolState={analysis.VolumeState}");
 		
-		        NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
+			var execDecision =
+		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualExecutionEngine.Evaluate(
+		        decision,
+		        analysis,
+		        _manualPositionState,
+		        entryPrice,
+		        stopPrice,
+		        targetPrice);
+		
+			Print(
+			    $"[Execution] C#{analysis.Snapshot.ContainerId} " +
+			    $"Action={execDecision.Action} Reason={execDecision.Reason} " +
+			    $"Pos={_manualPositionState.Side} " +
+			    $"Entry={(_manualPositionState.EntryPrice.HasValue ? _manualPositionState.EntryPrice.Value.ToString() : "None")} " +
+			    $"Stop={(_manualPositionState.StopPrice.HasValue ? _manualPositionState.StopPrice.Value.ToString() : "None")} " +
+			    $"Target={(_manualPositionState.TargetPrice.HasValue ? _manualPositionState.TargetPrice.Value.ToString() : "None")}");
+		
+		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 		    }
 		    finally
 		    {
