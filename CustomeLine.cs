@@ -150,6 +150,9 @@ private int? _lastPublishedFlipCount = null;
 private int? _lastPublishedVolCount = null;
 private string _lastPublishedSignal = null;
 private bool _publishInProgress = false;
+ 
+private NinjaTrader.NinjaScript.xPva.Engine.ManualSignalState _manualSignalState =
+    new NinjaTrader.NinjaScript.xPva.Engine.ManualSignalState();
 
 private bool ShouldPublishManualAnalysis(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
@@ -251,7 +254,12 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
 		int flipCount = analysis.VolumeSequence.FlipCount;
 		
-		bool isTradable = false;
+		string signal =
+		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualSignalEngine.EvaluateSignal(
+		        analysis,
+		        _manualSignalState);
+		
+		bool isTradable = signal != "SKIP";
 
 		switch (analysis.VolumeState)
 		{
@@ -276,7 +284,7 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		        break;
 		}
 		
-		string signal = "SKIP";
+		//string signal = "SKIP";
 		
 		if (isTradable && analysis.FttConfirmedBar.HasValue)
 		{
@@ -314,8 +322,7 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 
         Print(
 		    $"[ManualSignal] C#{analysis.Snapshot.ContainerId} " +
-		    $"Signal={signal} " +
-		    $"Tradable={isTradable} " +
+		    $"Signal={signal} Tradable={isTradable} Transition={decision.Transition} Phase={decision.Phase} " +
 		    $"Confirmed={(analysis.FttConfirmedBar.HasValue ? analysis.FttConfirmedBar.Value.ToString() : "None")} " +
 		    $"End={analysis.Snapshot.AnalysisEndBarIndex} " +
 		    $"Flip={flipCount} Mixed={mixed} DomShift={domShift} NDReturn={ndReturn} " +
