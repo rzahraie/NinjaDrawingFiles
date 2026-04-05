@@ -254,37 +254,13 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		bool ndReturn = analysis.VolumeSequence.HasNonDominantReturn;
 		int flipCount = analysis.VolumeSequence.FlipCount;
 		
-		string signal =
-		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualSignalEngine.EvaluateSignal(
+		var decision =
+		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualSignalEngine.Evaluate(
 		        analysis,
 		        _manualSignalState);
 		
+		string signal = decision.Signal;
 		bool isTradable = signal != "SKIP";
-
-		switch (analysis.VolumeState)
-		{
-		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.BalancedAlternation:
-		        isTradable = analysis.FttConfirmedBar.HasValue;
-		        break;
-		
-		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.DominantPulse:
-		        isTradable = analysis.FttConfirmedBar.HasValue;
-		        break;
-		
-		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.NonDominantReturn:
-		        isTradable = false;
-		        break;
-		
-		    case NinjaTrader.NinjaScript.xPva.Engine.ManualVolumeState.MixedChop:
-		        isTradable = false;
-		        break;
-		
-		    default:
-		        isTradable = false;
-		        break;
-		}
-		
-		//string signal = "SKIP";
 		
 		if (isTradable && analysis.FttConfirmedBar.HasValue)
 		{
