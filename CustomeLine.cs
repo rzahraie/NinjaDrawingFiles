@@ -156,6 +156,15 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualSignalState _manualSignalState
  
 private NinjaTrader.NinjaScript.xPva.Engine.ManualPositionState _manualPositionState =
     new NinjaTrader.NinjaScript.xPva.Engine.ManualPositionState();
+ 
+private struct SignalMarker
+{
+    public int BarIndex;
+    public double Price;
+    public string Kind;   // "LONG", "SHORT", "EXIT_LONG", "EXIT_SHORT"
+}
+
+private readonly List<SignalMarker> _signalMarkers = new List<SignalMarker>();
 
 private bool ShouldPublishManualAnalysis(
     NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
@@ -371,12 +380,155 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 			    $"Stop={(_manualPositionState.StopPrice.HasValue ? _manualPositionState.StopPrice.Value.ToString() : "None")} " +
 			    $"Target={(_manualPositionState.TargetPrice.HasValue ? _manualPositionState.TargetPrice.Value.ToString() : "None")}");
 		
+			DrawArrows(analysis, execDecision, chartBars);
+		
+			var execSnapshot =
+			    new NinjaTrader.NinjaScript.xPva.Engine.ManualExecutionSnapshot(
+			        analysis.Snapshot.ContainerId,
+			        execDecision.Action,
+			        execDecision.Reason,
+			        signal,
+			        analysis.FttConfirmedBar,
+			        entryPrice,
+			        stopPrice,
+			        targetPrice);
+		
+			NinjaTrader.NinjaScript.xPva.Engine.xPvaManualExecutionBridge.Publish(execSnapshot);
 		    NinjaTrader.NinjaScript.xPva.Engine.xPvaManualContainerBridge.Publish(analysis);
 		    }
 		    finally
 		    {
 		        _publishInProgress = false;
 		    }
+}
+
+private void DrawArrows(
+    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
+    NinjaTrader.NinjaScript.xPva.Engine.ManualExecutionDecision execDecision,
+    ChartBars chartBars)
+{
+    int barIdx = analysis.Snapshot.AnalysisEndBarIndex;
+
+    if (barIdx < 0 || barIdx >= chartBars.Bars.Count)
+        return;
+
+    double tickSize = chartBars.Bars.Instrument.MasterInstrument.TickSize;
+    double high = chartBars.Bars.GetHigh(barIdx);
+    double low = chartBars.Bars.GetLow(barIdx);
+
+    string kind = null;
+    double price = 0.0;
+
+    if (execDecision.Action == "ENTER_LONG")
+    {
+        kind = "LONG";
+        price = low - 2 * tickSize;
+    }
+    else if (execDecision.Action == "ENTER_SHORT")
+    {
+        kind = "SHORT";
+        price = high + 2 * tickSize;
+    }
+    else if (execDecision.Action == "EXIT_LONG")
+    {
+        kind = "EXIT_LONG";
+        price = high + 2 * tickSize;
+    }
+    else if (execDecision.Action == "EXIT_SHORT")
+    {
+        kind = "EXIT_SHORT";
+        price = low - 2 * tickSize;
+    }
+
+    if (kind == null)
+        return;
+
+    // Avoid exact duplicates
+    for (int i = 0; i < _signalMarkers.Count; i++)
+    {
+        var m = _signalMarkers[i];
+        if (m.BarIndex == barIdx && m.Kind == kind)
+            return;
+    }
+
+    _signalMarkers.Add(new SignalMarker
+    {
+        BarIndex = barIdx,
+        Price = price,
+        Kind = kind
+    });
+}
+
+private void RenderSignalMarkers(ChartControl chartControl, ChartScale chartScale, ChartBars chartBars)
+{
+    if (chartControl == null || chartScale == null || ChartPanel == null || _signalMarkers.Count == 0)
+        return;
+
+    var rt = RenderTarget;
+    if (rt == null)
+        return;
+
+    foreach (var m in _signalMarkers)
+    {
+        float x = chartControl.GetXByBarIndex(chartBars, m.BarIndex);
+        float y = chartScale.GetYByValue(m.Price);
+
+        SharpDX.Vector2 p1, p2, p3;
+        bool isExit = false;
+
+        if (m.Kind == "LONG")
+        {
+            p1 = new SharpDX.Vector2(x, y - 8);
+            p2 = new SharpDX.Vector2(x - 6, y + 4);
+            p3 = new SharpDX.Vector2(x + 6, y + 4);
+        }
+        else if (m.Kind == "SHORT")
+        {
+            p1 = new SharpDX.Vector2(x, y + 8);
+            p2 = new SharpDX.Vector2(x - 6, y - 4);
+            p3 = new SharpDX.Vector2(x + 6, y - 4);
+        }
+        else
+        {
+            isExit = true;
+            p1 = new SharpDX.Vector2(x - 4, y - 4);
+            p2 = new SharpDX.Vector2(x + 4, y + 4);
+            p3 = new SharpDX.Vector2(x - 4, y + 4);
+        }
+
+        using (var path = new SharpDX.Direct2D1.PathGeometry(Core.Globals.D2DFactory))
+        using (var sink = path.Open())
+        {
+            if (isExit)
+            {
+                sink.BeginFigure(new SharpDX.Vector2(x - 4, y - 4), SharpDX.Direct2D1.FigureBegin.Hollow);
+                sink.AddLine(new SharpDX.Vector2(x + 4, y + 4));
+                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Open);
+
+                sink.BeginFigure(new SharpDX.Vector2(x - 4, y + 4), SharpDX.Direct2D1.FigureBegin.Hollow);
+                sink.AddLine(new SharpDX.Vector2(x + 4, y - 4));
+                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Open);
+            }
+            else
+            {
+                sink.BeginFigure(p1, SharpDX.Direct2D1.FigureBegin.Filled);
+                sink.AddLine(p2);
+                sink.AddLine(p3);
+                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Closed);
+            }
+
+            sink.Close();
+
+            var brush = (m.Kind == "LONG")
+                ? UpBrushDX
+                : (m.Kind == "SHORT")
+                    ? DownBrushDX
+                    : TextBrushDX;
+
+            rt.FillGeometry(path, brush);
+            rt.DrawGeometry(path, brush, 1f);
+        }
+    }
 }
 
 private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
@@ -1663,142 +1815,144 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
  
  public override void OnRender(ChartControl chartControl, ChartScale chartScale)
  {
- if (_isExtending) return;
- 
- _lastChartScale = chartScale;
- 
- if (chartControl == null || chartScale == null || RenderTarget == null) return;
- if (LineStroke == null || StartAnchor == null || EndAnchor == null) return;
- 
- if (activeChartControl == null)
- SetContextMenuHandlers(chartControl,chartScale);
- 
- EnsureAutoTimer();
- 
- if (AutoExtend && !_autoRunning) StartAutoExtend();
- if (!AutoExtend && _autoRunning) StopAutoExtend();
- 
- if (_autoTimer != null)
- {
- var desired = TimeSpan.FromMilliseconds(Math.Max(50, AutoExtendIntervalMs));
- if (_autoTimer.Interval != desired)
- _autoTimer.Interval = desired;
- }
- 
- if (segments.Count == 0 &&
- !_recalcAfterReloadTried &&
- !StartAnchor.IsEditing && !EndAnchor.IsEditing)
- {
- _recalcAfterReloadTried = true;
- try { CalculateLTLCoordinates(chartControl, chartScale); }
- catch (Exception ex) { Print("OnRender lazy recalc: " + ex.Message); }
- }
- 
- try {
- LineStroke.RenderTarget = RenderTarget;
- RenderTarget.AntialiasMode = SharpDX.Direct2D1.AntialiasMode.PerPrimitive;
- 
- var panel = chartControl.ChartPanels[chartScale.PanelIndex];
- 
- if (UpBrush == null) UpBrush = Brushes.Blue;
- if (DownBrush == null) DownBrush = Brushes.Red;
- LineStroke.Brush = isUpContainer ? UpBrush : DownBrush;
- 
- if ((DrawingState == DrawingState.Building || DrawingState == DrawingState.Normal) && hoverHitPx.HasValue)
- {
- using (var blueBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0, 120, 215, 180)))
- {
- var rect = new SharpDX.RectangleF(
- (float)(hoverHitPx.Value.X - _snapSizePx / 2f),
- (float)(hoverHitPx.Value.Y - _snapSizePx / 2f),
- _snapSizePx,
- _snapSizePx
- );
- RenderTarget.FillRectangle(rect, blueBrush);
- 
- using (var borderBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0, 80, 180, 255)))
- {
- RenderTarget.DrawRectangle(rect, borderBrush, 1f);
- }
- }
- }
- 
- if (!IsInHitTest && DrawingState == DrawingState.Editing && _snapRectDx.HasValue)
- {
- using (var snapBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(255, 165, 0, 180)))
- {
- RenderTarget.FillRectangle(_snapRectDx.Value, snapBrush);
- }
- }
- 
- double strokePixAdj = ((double)(LineStroke.Width % 2)).ApproxCompare(0) == 0 ? 0.5 : 0.0;
- Vector pixelAdjustVec = new Vector(strokePixAdj, strokePixAdj);
- 
- // RTL
- Point startPoint = StartAnchor.GetPoint(chartControl, panel, chartScale);
- Point endPoint = EndAnchor.GetPoint(chartControl, panel, chartScale);
- 
- var brushDX = IsInHitTest && chartControl.SelectionBrush != null
- ? chartControl.SelectionBrush
- : LineStroke.BrushDX;
- 
- RenderTarget.DrawLine((startPoint + pixelAdjustVec).ToVector2(),
- (endPoint + pixelAdjustVec).ToVector2(),
- brushDX, LineStroke.Width, LineStroke.StrokeStyle);
- 
- 
- var bars = GetBarsForAnchors(chartControl);
- if (bars == null) return;
- 
- foreach (var seg in segments)
- {
- int sIdx = seg.SIdx, eIdx = seg.EIdx;
- double sPrice = seg.SY, ePrice = seg.EY;
- if (sIdx < 0 || eIdx < 0 || sIdx >= bars.Count || eIdx >= bars.Count) continue;
- 
- Point segStart = new Point(chartControl.GetXByBarIndex(bars, sIdx), chartScale.GetYByValue(sPrice));
- Point segEnd = new Point(chartControl.GetXByBarIndex(bars, eIdx), chartScale.GetYByValue(ePrice));
- 
- RenderTarget.DrawLine((segStart + pixelAdjustVec).ToVector2(),
- (segEnd + pixelAdjustVec).ToVector2(),
- brushDX, LineStroke.Width, LineStroke.StrokeStyle);
- }
- 
- if (_showNumbers && _lastSIdx.HasValue && _lastP2Idx.HasValue && _lastP3Idx.HasValue)
- {
- var barsNum = GetActiveBars(chartControl, chartScale);
- if (barsNum != null && barsNum.Count > 0)
- {
- panel = chartControl.ChartPanels[chartScale.PanelIndex];
- 
- int p1Idx = _lastSIdx.Value;
- int p2Idx = _lastP2Idx.Value;
- int p3Idx = _lastP3Idx.Value;
- 
- double p1AbsX = StartAnchor.GetPoint(chartControl, panel, chartScale).X;
- 
- const float belowNudge = 3f;
- const float aboveNudge = 4f;
- 
- if (isUpContainer)
- {
- DrawNumberLabel(chartControl, chartScale, barsNum, p1Idx, /*above*/ false, "1", belowNudge, p1AbsX);
- DrawNumberLabel(chartControl, chartScale, barsNum, p2Idx, /*above*/ true, "2", aboveNudge);
- DrawNumberLabel(chartControl, chartScale, barsNum, p3Idx, /*above*/ false, "3", belowNudge);
- }
- else
- {
- DrawNumberLabel(chartControl, chartScale, barsNum, p1Idx, /*above*/ true, "1", aboveNudge, p1AbsX);
- DrawNumberLabel(chartControl, chartScale, barsNum, p2Idx, /*above*/ false, "2", belowNudge);
- DrawNumberLabel(chartControl, chartScale, barsNum, p3Idx, /*above*/ true, "3", aboveNudge);
- }
- }
- }
- 
- }
- catch(System.Exception e) {
- Print("System exception : " + e.ToString());
- }
+	 if (_isExtending) return;
+	 
+	 _lastChartScale = chartScale;
+	 
+	 if (chartControl == null || chartScale == null || RenderTarget == null) return;
+	 if (LineStroke == null || StartAnchor == null || EndAnchor == null) return;
+	 
+	 if (activeChartControl == null)
+	 SetContextMenuHandlers(chartControl,chartScale);
+	 
+	 EnsureAutoTimer();
+	 
+	 if (AutoExtend && !_autoRunning) StartAutoExtend();
+	 if (!AutoExtend && _autoRunning) StopAutoExtend();
+	 
+	 if (_autoTimer != null)
+	 {
+	 var desired = TimeSpan.FromMilliseconds(Math.Max(50, AutoExtendIntervalMs));
+	 if (_autoTimer.Interval != desired)
+	 _autoTimer.Interval = desired;
+	 }
+	 
+	 if (segments.Count == 0 &&
+	 !_recalcAfterReloadTried &&
+	 !StartAnchor.IsEditing && !EndAnchor.IsEditing)
+	 {
+	 _recalcAfterReloadTried = true;
+	 try { CalculateLTLCoordinates(chartControl, chartScale); }
+	 catch (Exception ex) { Print("OnRender lazy recalc: " + ex.Message); }
+	 }
+	 
+	 try {
+		 LineStroke.RenderTarget = RenderTarget;
+		 RenderTarget.AntialiasMode = SharpDX.Direct2D1.AntialiasMode.PerPrimitive;
+		 
+		 var panel = chartControl.ChartPanels[chartScale.PanelIndex];
+		 
+		 if (UpBrush == null) UpBrush = Brushes.Blue;
+		 if (DownBrush == null) DownBrush = Brushes.Red;
+		 LineStroke.Brush = isUpContainer ? UpBrush : DownBrush;
+		 
+		 if ((DrawingState == DrawingState.Building || DrawingState == DrawingState.Normal) && hoverHitPx.HasValue)
+		 {
+		 using (var blueBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0, 120, 215, 180)))
+		 {
+		 var rect = new SharpDX.RectangleF(
+		 (float)(hoverHitPx.Value.X - _snapSizePx / 2f),
+		 (float)(hoverHitPx.Value.Y - _snapSizePx / 2f),
+		 _snapSizePx,
+		 _snapSizePx
+		 );
+		 RenderTarget.FillRectangle(rect, blueBrush);
+		 
+		 using (var borderBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0, 80, 180, 255)))
+		 {
+		 RenderTarget.DrawRectangle(rect, borderBrush, 1f);
+		 }
+		 }
+		 }
+		 
+		 if (!IsInHitTest && DrawingState == DrawingState.Editing && _snapRectDx.HasValue)
+		 {
+		 using (var snapBrush = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(255, 165, 0, 180)))
+		 {
+		 RenderTarget.FillRectangle(_snapRectDx.Value, snapBrush);
+		 }
+		 }
+		 
+		 double strokePixAdj = ((double)(LineStroke.Width % 2)).ApproxCompare(0) == 0 ? 0.5 : 0.0;
+		 Vector pixelAdjustVec = new Vector(strokePixAdj, strokePixAdj);
+		 
+		 // RTL
+		 Point startPoint = StartAnchor.GetPoint(chartControl, panel, chartScale);
+		 Point endPoint = EndAnchor.GetPoint(chartControl, panel, chartScale);
+		 
+		 var brushDX = IsInHitTest && chartControl.SelectionBrush != null
+		 ? chartControl.SelectionBrush
+		 : LineStroke.BrushDX;
+		 
+		 RenderTarget.DrawLine((startPoint + pixelAdjustVec).ToVector2(),
+		 (endPoint + pixelAdjustVec).ToVector2(),
+		 brushDX, LineStroke.Width, LineStroke.StrokeStyle);
+		 
+		 
+		 var bars = GetBarsForAnchors(chartControl);
+		 if (bars == null) return;
+		 
+		 foreach (var seg in segments)
+		 {
+		 int sIdx = seg.SIdx, eIdx = seg.EIdx;
+		 double sPrice = seg.SY, ePrice = seg.EY;
+		 if (sIdx < 0 || eIdx < 0 || sIdx >= bars.Count || eIdx >= bars.Count) continue;
+		 
+		 Point segStart = new Point(chartControl.GetXByBarIndex(bars, sIdx), chartScale.GetYByValue(sPrice));
+		 Point segEnd = new Point(chartControl.GetXByBarIndex(bars, eIdx), chartScale.GetYByValue(ePrice));
+		 
+		 RenderTarget.DrawLine((segStart + pixelAdjustVec).ToVector2(),
+		 (segEnd + pixelAdjustVec).ToVector2(),
+		 brushDX, LineStroke.Width, LineStroke.StrokeStyle);
+		 }
+		 
+		 if (_showNumbers && _lastSIdx.HasValue && _lastP2Idx.HasValue && _lastP3Idx.HasValue)
+		 {
+			 var barsNum = GetActiveBars(chartControl, chartScale);
+				 
+			 if (barsNum != null && barsNum.Count > 0)
+			 {
+				 panel = chartControl.ChartPanels[chartScale.PanelIndex];
+				 
+				 int p1Idx = _lastSIdx.Value;
+				 int p2Idx = _lastP2Idx.Value;
+				 int p3Idx = _lastP3Idx.Value;
+				 
+				 double p1AbsX = StartAnchor.GetPoint(chartControl, panel, chartScale).X;
+				 
+				 const float belowNudge = 3f;
+				 const float aboveNudge = 4f;
+				 
+				 if (isUpContainer)
+				 {
+				 DrawNumberLabel(chartControl, chartScale, barsNum, p1Idx, /*above*/ false, "1", belowNudge, p1AbsX);
+				 DrawNumberLabel(chartControl, chartScale, barsNum, p2Idx, /*above*/ true, "2", aboveNudge);
+				 DrawNumberLabel(chartControl, chartScale, barsNum, p3Idx, /*above*/ false, "3", belowNudge);
+				 }
+				 else
+				 {
+					 DrawNumberLabel(chartControl, chartScale, barsNum, p1Idx, /*above*/ true, "1", aboveNudge, p1AbsX);
+					 DrawNumberLabel(chartControl, chartScale, barsNum, p2Idx, /*above*/ false, "2", belowNudge);
+					 DrawNumberLabel(chartControl, chartScale, barsNum, p3Idx, /*above*/ true, "3", aboveNudge);
+				 }
+			 }
+		 }
+	 
+		 RenderSignalMarkers(chartControl,chartScale, bars);
+	 }
+	 catch(System.Exception e) {
+	 Print("System exception : " + e.ToString());
+	 }
  }
  
  private void UpdateVeAnchorsFromLastSegment(ChartControl chartControl)
