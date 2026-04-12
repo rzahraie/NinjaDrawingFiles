@@ -380,8 +380,6 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 			    $"Stop={(_manualPositionState.StopPrice.HasValue ? _manualPositionState.StopPrice.Value.ToString() : "None")} " +
 			    $"Target={(_manualPositionState.TargetPrice.HasValue ? _manualPositionState.TargetPrice.Value.ToString() : "None")}");
 		
-			DrawArrows(analysis, execDecision, chartBars);
-		
 			var execSnapshot =
 			    new NinjaTrader.NinjaScript.xPva.Engine.ManualExecutionSnapshot(
 			        analysis.Snapshot.ContainerId,
@@ -400,135 +398,6 @@ private void PublishManualSnapshotIfReady(ChartControl chartControl, ChartBars c
 		    {
 		        _publishInProgress = false;
 		    }
-}
-
-private void DrawArrows(
-    NinjaTrader.NinjaScript.xPva.Engine.ManualContainerAnalysis analysis,
-    NinjaTrader.NinjaScript.xPva.Engine.ManualExecutionDecision execDecision,
-    ChartBars chartBars)
-{
-    int barIdx = analysis.Snapshot.AnalysisEndBarIndex;
-
-    if (barIdx < 0 || barIdx >= chartBars.Bars.Count)
-        return;
-
-    double tickSize = chartBars.Bars.Instrument.MasterInstrument.TickSize;
-    double high = chartBars.Bars.GetHigh(barIdx);
-    double low = chartBars.Bars.GetLow(barIdx);
-
-    string kind = null;
-    double price = 0.0;
-
-    if (execDecision.Action == "ENTER_LONG")
-    {
-        kind = "LONG";
-        price = low - 2 * tickSize;
-    }
-    else if (execDecision.Action == "ENTER_SHORT")
-    {
-        kind = "SHORT";
-        price = high + 2 * tickSize;
-    }
-    else if (execDecision.Action == "EXIT_LONG")
-    {
-        kind = "EXIT_LONG";
-        price = high + 2 * tickSize;
-    }
-    else if (execDecision.Action == "EXIT_SHORT")
-    {
-        kind = "EXIT_SHORT";
-        price = low - 2 * tickSize;
-    }
-
-    if (kind == null)
-        return;
-
-    // Avoid exact duplicates
-    for (int i = 0; i < _signalMarkers.Count; i++)
-    {
-        var m = _signalMarkers[i];
-        if (m.BarIndex == barIdx && m.Kind == kind)
-            return;
-    }
-
-    _signalMarkers.Add(new SignalMarker
-    {
-        BarIndex = barIdx,
-        Price = price,
-        Kind = kind
-    });
-}
-
-private void RenderSignalMarkers(ChartControl chartControl, ChartScale chartScale, ChartBars chartBars)
-{
-    if (chartControl == null || chartScale == null || ChartPanel == null || _signalMarkers.Count == 0)
-        return;
-
-    var rt = RenderTarget;
-    if (rt == null)
-        return;
-
-    foreach (var m in _signalMarkers)
-    {
-        float x = chartControl.GetXByBarIndex(chartBars, m.BarIndex);
-        float y = chartScale.GetYByValue(m.Price);
-
-        SharpDX.Vector2 p1, p2, p3;
-        bool isExit = false;
-
-        if (m.Kind == "LONG")
-        {
-            p1 = new SharpDX.Vector2(x, y - 8);
-            p2 = new SharpDX.Vector2(x - 6, y + 4);
-            p3 = new SharpDX.Vector2(x + 6, y + 4);
-        }
-        else if (m.Kind == "SHORT")
-        {
-            p1 = new SharpDX.Vector2(x, y + 8);
-            p2 = new SharpDX.Vector2(x - 6, y - 4);
-            p3 = new SharpDX.Vector2(x + 6, y - 4);
-        }
-        else
-        {
-            isExit = true;
-            p1 = new SharpDX.Vector2(x - 4, y - 4);
-            p2 = new SharpDX.Vector2(x + 4, y + 4);
-            p3 = new SharpDX.Vector2(x - 4, y + 4);
-        }
-
-        using (var path = new SharpDX.Direct2D1.PathGeometry(Core.Globals.D2DFactory))
-        using (var sink = path.Open())
-        {
-            if (isExit)
-            {
-                sink.BeginFigure(new SharpDX.Vector2(x - 4, y - 4), SharpDX.Direct2D1.FigureBegin.Hollow);
-                sink.AddLine(new SharpDX.Vector2(x + 4, y + 4));
-                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Open);
-
-                sink.BeginFigure(new SharpDX.Vector2(x - 4, y + 4), SharpDX.Direct2D1.FigureBegin.Hollow);
-                sink.AddLine(new SharpDX.Vector2(x + 4, y - 4));
-                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Open);
-            }
-            else
-            {
-                sink.BeginFigure(p1, SharpDX.Direct2D1.FigureBegin.Filled);
-                sink.AddLine(p2);
-                sink.AddLine(p3);
-                sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Closed);
-            }
-
-            sink.Close();
-
-            var brush = (m.Kind == "LONG")
-                ? UpBrushDX
-                : (m.Kind == "SHORT")
-                    ? DownBrushDX
-                    : TextBrushDX;
-
-            rt.FillGeometry(path, brush);
-            rt.DrawGeometry(path, brush, 1f);
-        }
-    }
 }
 
 private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManualContainerSnapshot(
@@ -556,53 +425,6 @@ private NinjaTrader.NinjaScript.xPva.Engine.ManualContainerSnapshot? BuildManual
 	    return null;
 	}
 	
-	/*if (!validOrder)
-	{
-	    Print($"[CustomLine-BadOrder] kind={containerKind} p1={p1Idx} p2={p2Idx} p3={p3Idx}");
-	    return null;
-	}*/
-	
-	// Repair degenerate P2 when the tool reports P1 == P2.
-	// For up containers, choose the highest high between P1 and P3.
-	// For down containers, choose the lowest low between P1 and P3.
-	/*if (p2Idx <= p1Idx && p3Idx > p1Idx)
-	{
-	    int repairedP2 = p1Idx;
-	
-	    if (isUpContainer)
-	    {
-	        double bestHigh = chartBars.Bars.GetHigh(p1Idx);
-	
-	        for (int i = p1Idx + 1; i <= p3Idx; i++)
-	        {
-	            double h = chartBars.Bars.GetHigh(i);
-	            if (h > bestHigh)
-	            {
-	                bestHigh = h;
-	                repairedP2 = i;
-	            }
-	        }
-	    }
-	    else
-	    {
-	        double bestLow = chartBars.Bars.GetLow(p1Idx);
-	
-	        for (int i = p1Idx + 1; i <= p3Idx; i++)
-	        {
-	            double l = chartBars.Bars.GetLow(i);
-	            if (l < bestLow)
-	            {
-	                bestLow = l;
-	                repairedP2 = i;
-	            }
-	        }
-	    }
-	
-	    p2Idx = repairedP2;
-	}*/
-	
-	
-
     double p1Price = (double)startPriceDec;
     double p2Price = GetPriceAtBar(chartBars, p2Idx, isUpContainer ? true : false);
     double p3Price = GetPriceAtBar(chartBars, p3Idx, isUpContainer ? false : true);
@@ -1947,8 +1769,6 @@ void UpdateEndAnchor(ChartAnchor end, int endBar, Instrument instr)
 				 }
 			 }
 		 }
-	 
-		 RenderSignalMarkers(chartControl,chartScale, bars);
 	 }
 	 catch(System.Exception e) {
 	 Print("System exception : " + e.ToString());
